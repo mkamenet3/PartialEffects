@@ -1,0 +1,626 @@
+---
+title: "Simulation Results: Analysis"
+author: "M.Kamenetsky"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true # table of content true
+    toc_depth: 4
+---
+
+
+Update 2024-10-17: updated sims including new WQS methods
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, cache = FALSE)
+library(tidyverse)
+library(ggcorrplot)
+library(kableExtra)
+library(qgcomp)
+library(gWQS)
+
+# table one
+library(tableone)
+library(gt)
+library(glmnet)
+library(data.table)
+library(ggh4x)
+library(patchwork)
+library(gt)
+library(gtsummary)
+`%ni%` <- Negate(`%in%`)
+```
+
+# FUNCTIONS
+
+```{r}
+makeplot1 <- function(dat, x, filterstring, mse=TRUE, titlestring, xlabstring, ylabstring){
+  if(mse==TRUE){
+    dat %>%
+      dplyr::filter(type %in% c(filterstring)) %>%
+      pivot_longer(cols=c(`Positive Effect`, `Negative Effect`), names_to = "posneg", values_to = "mse")%>% 
+      pivot_longer(cols=c(biaspos,biasneg), names_to = "posneg2", values_to = "bias") %>%
+      group_by(type, name.x,N, jointpos, jointneg, Nexposures, Nexposures0, posneg, posneg2, corr, imbalance, missing) %>%
+      dplyr::summarize(mean_mse = mean(mse),
+                mean_bias = mean(bias)) %>% 
+      filter((posneg=="Negative Effect" & posneg2=="biasneg") | (posneg=="Positive Effect" & posneg2=="biaspos")) %>%
+      mutate(name.x2 = name.x) %>%
+      mutate(name.x = if_else( name.x2=="QGC: A Priori", "QGCAP",
+                               if_else(name.x2 == "QGC: Enet", "QGCEN", name.x2))) %>% 
+      ggplot() +
+      geom_line(aes(y=log(mean_mse), x=.data[[x]], group=name.x, color=name.x), size=2) +
+      geom_point(aes(y=log(mean_mse), x=.data[[x]], shape=name.x), size=3) +
+      scale_shape_manual(values=1:9)+
+      facet_grid(.~posneg) + theme_bw()+ ggtitle(titlestring) + xlab(xlabstring)+ylab(ylabstring) + theme(legend.position = "bottom",legend.title = element_blank())+
+      scale_color_manual(values=mycols) 
+  }else{
+    scales <- list(
+      scale_y_continuous(),
+      scale_y_reverse()
+    )
+    #browser()
+    dat %>%
+      dplyr::filter(type %in% c(filterstring)) %>%
+      pivot_longer(cols=c(`Positive Effect`, `Negative Effect`), names_to = "posneg", values_to = "mse")%>%
+      pivot_longer(cols=c(biaspos,biasneg), names_to = "posneg2", values_to = "bias") %>%
+      group_by(type, name.x,N, jointpos, jointneg, Nexposures, Nexposures0, posneg, posneg2,corr, imbalance, missing) %>%
+      dplyr::summarize(mean_mse = mean(mse),
+                mean_bias = mean(bias)) %>%
+      filter((posneg=="Negative Effect" & posneg2=="biasneg") | (posneg=="Positive Effect" & posneg2=="biaspos")) %>%
+      # dplyr::mutate(biasposneg2 = recode(posneg2, 
+      #                             "biasneg" = "Negative Effect",
+      #                             "biaspos" = "Positive Effect")) %>%
+     dplyr::mutate(name.x2 = name.x) %>%
+    dplyr::mutate(name.x = if_else( name.x2=="QGC: A Priori", "QGCAP",
+                               if_else(name.x2 == "QGC: Enet", "QGCEN", name.x2))) %>% 
+      
+      ggplot() +
+      geom_line(aes(y=mean_bias, x=.data[[x]], group=name.x, color=name.x), size=2) +
+      geom_point(aes(y=mean_bias, x=.data[[x]], shape=name.x), size=3) +
+      facet_wrap(.~posneg) +
+       scale_shape_manual(values=1:9)+
+      theme_bw()+ ggtitle(titlestring) + xlab(xlabstring)+ylab(ylabstring) + theme(legend.position = "bottom",legend.title = element_blank())+
+      scale_color_manual(values=mycols) +
+      ylim(-0.3, 0.3)
+  }
+}
+
+datasummary1 <- function(dat, x, filterstring, mse=TRUE){
+      outdat <- dat %>%
+      dplyr::filter(type %in% c(filterstring)) %>%
+      pivot_longer(cols=c(`Positive Effect`, `Negative Effect`), names_to = "posneg", values_to = "mse")%>%
+      pivot_longer(cols=c(biaspos,biasneg), names_to = "posneg2", values_to = "bias") %>%
+      group_by(type, name.x,N, jointpos, jointneg, Nexposures, Nexposures0, posneg, posneg2, corr, imbalance, missing) %>%
+      dplyr::summarize(mean_mse = mean(mse),
+                mean_bias = mean(bias)) 
+      return(outdat)
+}
+
+
+```
+
+
+```{r}
+mycols <- c("#000000", "#E69F00", "#56B4E9", "#009E73", 
+                       "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999")
+```
+
+
+# Prep data  
+  
+```{r}
+# main <- read.csv("../../Results/r1/main_simpartialeffects_20241028.csv") %>%
+main <- read.csv("../../Results/r1/main_simpartialeffects_20241108.csv") %>%
+  filter(type != "type") %>%
+  mutate(value = as.numeric(value),
+         N = as.numeric(N),
+         Nexposures = as.numeric(Nexposures),
+         Nexposures0 = as.numeric(Nexposures0),
+         bias = as.numeric(bias),
+         jointpos = as.numeric(jointpos),
+         jointneg = as.numeric(jointneg)) %>%
+  mutate(sumpartialsTRUTH = jointpos + jointneg)
+
+```
+
+
+
+```{r}
+datoverall <- main %>%
+  dplyr::rename(simID = iter) %>%
+  filter(name=="Overall (Joint Effect)") %>%
+  pivot_wider(id_cols = c(simID, name, type),names_from = posneg, values_from = value)
+
+
+  
+
+mainA <- main %>%
+  dplyr::rename(simID = iter) %>%
+  filter(name!="Overall (Joint Effect)") %>%
+  pivot_wider(id_cols = c(simID, name, type, N,jointpos, jointneg, sumpartialsTRUTH, Nexposures, Nexposures0),names_from = posneg, values_from = c(value, bias)) %>%
+  dplyr::rename(poseffect = `value_Positive Effect`,
+         negeffect = `value_Negative Effect`,
+         biaspos = `bias_Positive Effect`,
+         biasneg = `bias_Negative Effect`) %>%
+  mutate(sumjointeffect = poseffect+ negeffect) %>%
+  group_by(type,name) %>%
+  dplyr::mutate(countn = dplyr::n()) %>%
+  dplyr::mutate(`Positive Effect`  =  ((poseffect - jointpos)^2)/countn,
+         `Negative Effect`  =  ((negeffect - jointneg)^2)/countn)
+
+mainB <- merge(mainA, datoverall, by=c("simID", "type")) %>%
+  dplyr::mutate(corr = ifelse(type=="base0 hicorr Exp", 0.9,
+                       ifelse(type=="base0 medcorr Exp", 0.6,
+                              ifelse(type=="base0 smallcorr Exp", 0.1,
+                                     ifelse(type=="base0", 0,NA))))) %>%
+  dplyr::mutate(imbalance = ifelse(type=="base0 small imbalance", "Small",
+                       ifelse(type=="base0 med imbalance", "Medium",
+                              ifelse(type=="base0 large imbalance", "Large", "No Imbalance")))) %>%
+  dplyr::mutate(imbalance = fct_relevel(imbalance, c("No Imbalance","Small","Medium", "Large"))) %>% 
+  dplyr::mutate(missing = ifelse(type=="base0 missingvars", "Missing Positive Exposure", "No Missing Exposures")) %>%
+    dplyr::mutate(missing = fct_relevel(missing, c("No Missing Exposures", "Missing Positive Exposure"))) %>% 
+  filter(name.x %ni% c("QGC: enet + X-fit", "QGC: X-fit")) %>%
+  dplyr::mutate(name0 = name.x) %>%
+  dplyr::mutate(name.x = dplyr::recode(name.x, 
+                         "QGC: A Priori" = "QGCAP",
+                         "QGC: enet" = "QGCEN")) %>% 
+  dplyr::mutate(Nexposures_all = Nexposures) %>%
+  dplyr::mutate(Nexposures = dplyr::recode(Nexposures, 
+                             `3` = 1,
+                             `6`= 4,
+                             `10` = 8)) %>%
+  dplyr::mutate(sum_avgbias = biaspos+biasneg) %>%
+  ungroup()
+
+main_meanjoint <- mainB %>%
+  group_by(type, name.x,N) %>% 
+  dplyr::summarize(meansumjoint = mean(sumjointeffect),
+            meanoverall = mean(`Joint Effect`),
+            n = n(),
+            sd=sd(sumjointeffect),
+            se = sd/sqrt(n))
+
+
+main_oc <- 
+  main %>%
+  pivot_longer(cols=starts_with("joint"), 
+               names_to = "posneg2",
+               values_to = "partialeffect") %>% 
+    dplyr::filter((posneg=="Negative Effect" & posneg2=="jointneg") | (posneg=="Positive Effect" & posneg2=="jointpos")) %>% 
+    dplyr::mutate(partialeffect = as.numeric(partialeffect)) %>%
+  dplyr::mutate(pediff = value-partialeffect,
+         bdiff = bias - 0) %>%
+  dplyr::mutate(maen=abs(pediff),
+         msen = pediff^2,
+         bmaen = abs(bdiff),
+         bmsen = bdiff^2) %>%
+   group_by(type, posneg, name) %>%
+  dplyr::mutate(countn = n()) %>% 
+ dplyr::mutate(pemae=sum(maen)/countn,
+         pemse=sum(msen)/countn,
+         bmae = sum(bmaen)/countn,
+         bmse = sum(bmsen)/countn) %>%
+  ungroup() %>%
+  dplyr::mutate(type2=type)%>%
+  tidyr::separate(type2, into=c("a","b"), sep="\\s")%>%
+  dplyr::mutate(base0 = ifelse(a=="base0",1,0)) %>%
+  dplyr::select(-c(a,b))
+
+
+
+  
+```
+  
+  
+  
+# Sample Size 
+
+## Base Case
+
+```{r}
+
+
+(p_samplesize_mse <- makeplot1(dat=mainB,x="N", filterstring = c("base0","base0 bigN", "base0 biggerN", "base0 smallN"),
+          mse=TRUE, titlestring = "Sample Size", 
+          xlabstring = "Sample Size, N", 
+          ylabstring = "(Log) MSE (higher is worse)")) 
+
+
+(p_samplesize_bias <- makeplot1(dat = mainB,x="N", filterstring = c("base0","base0 bigN", "base0 biggerN", "base0 smallN"),
+          mse=FALSE, titlestring = "Sample Size" , 
+          xlabstring = "Sample Size, N", 
+          ylabstring = "Average Bias (zero is best)") + 
+      ylim(-0.2, 0.2))
+
+
+
+```
+
+
+## Values for Manuscript
+
+```{r}
+
+#MSE
+outsamp_mse <- datasummary1(mainB, x= "type",filterstring = c("base0","base0 bigN", "base0 biggerN", "base0 smallN"),
+          mse=TRUE) %>%
+  filter((posneg=="Negative Effect" & posneg2=="biasneg") | (posneg=="Positive Effect" & posneg2=="biaspos"))
+outsamp_mse
+
+
+#average bias
+outsamp_bias <- datasummary1(mainB, x= "type",filterstring = c("base0","base0 bigN", "base0 biggerN", "base0 smallN"),
+          mse=FALSE) %>%
+  filter((posneg=="Negative Effect" & posneg2=="biasneg") | (posneg=="Positive Effect" & posneg2=="biaspos"))
+outsamp_bias
+
+
+```
+
+
+
+   
+   
+
+# Spread in exposures  
+
+## Base Case
+
+```{r}
+
+(p_spread_mse <- makeplot1(dat = mainB, x= "Nexposures",filterstring = c("base0 spread4", "base0 spread1", "base0 spread8"),
+          mse=TRUE, titlestring = "Spreading the Negative Partial Effect\nOver More Exposures", 
+          xlabstring = "Number of Negative Exposures", 
+          ylabstring = "(Log) MSE (higher is worse)"))
+(p_spread_bias <- makeplot1(dat = mainB, x= "Nexposures",filterstring = c("base0 spread4", "base0 spread1", "base0 spread8"),
+          mse=FALSE, titlestring = "Spreading the Partial Effect\nOver More Exposures", 
+          xlabstring = "Number of Negative Exposures", 
+          ylabstring = "Average Bias (zero is best)"))
+
+
+
+```
+
+
+
+
+
+
+## Values for Manuscript
+
+```{r}
+
+#MSE
+outspread_mse <- datasummary1(mainB, x= "type",filterstring = c("base0 spread4", "base0 spread1", "base0 spread8"),
+          mse=TRUE) %>%
+  filter((posneg=="Negative Effect" & posneg2=="biasneg") | (posneg=="Positive Effect" & posneg2=="biaspos"))
+outspread_mse
+
+
+
+#Average Bias
+outspread_bias <- datasummary1(mainB, x= "type",filterstring = c("base0 spread4", "base0 spread1", "base0 spread8"),
+          mse=FALSE) %>%
+  filter((posneg=="Negative Effect" & posneg2=="biasneg") | (posneg=="Positive Effect" & posneg2=="biaspos"))
+outspread_bias
+
+```
+
+
+
+
+
+
+# Hi/Med/Low Correlation in Exposures
+
+## Base Case
+
+```{r}
+
+(p_corr_mse <-makeplot1(dat = mainB, x= "corr",filterstring = c("base0 hicorr Exp", "base0 medcorr Exp", "base0 smallcorr Exp","base0"),
+          mse=TRUE, titlestring = "Correlated Exposures", 
+          xlabstring = "Correlation", 
+          ylabstring = "(Log) MSE (higher is worse)"))
+(p_corr_bias <- makeplot1(dat = mainB, x= "corr",filterstring = c("base0 hicorr Exp", "base0 medcorr Exp", "base0 smallcorr Exp","base0"),
+          mse=FALSE, titlestring = "Correlated Exposures", 
+          xlabstring = "Correlation", 
+          ylabstring = "Average Bias (zero is best)"))
+
+
+
+
+```
+
+## Values for Manuscript
+
+```{r}
+
+#MSE
+outcorr_mse <- datasummary1(mainB, x= "type",filterstring = c("base0 hicorr Exp", "base0 medcorr Exp", "base0 smallcorr Exp","base0"),
+          mse=TRUE) %>%
+  filter((posneg=="Negative Effect" & posneg2=="biasneg") | (posneg=="Positive Effect" & posneg2=="biaspos"))
+outcorr_mse
+
+
+#Average Bias
+outcorr_bias <- datasummary1(mainB, x= "type",filterstring = c("base0 hicorr Exp", "base0 medcorr Exp", "base0 smallcorr Exp","base0"),
+          mse=FALSE) %>%
+  filter((posneg=="Negative Effect" & posneg2=="biasneg") | (posneg=="Positive Effect" & posneg2=="biaspos"))
+outcorr_bias 
+```
+
+
+
+
+# Small/medium/large imbalance in partial effects
+
+## Base Case
+
+
+```{r}
+
+(p_imbalance_mse <- makeplot1(dat = mainB, x= "imbalance",filterstring = c("base0","base0 small imbalance", "base0 med imbalance", "base0 large imbalance"),
+          mse=TRUE, titlestring = "Imbalance in Positive Effect", 
+          xlabstring = "Imbalance", 
+          ylabstring = "(Log) MSE (higher is worse)") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)))
+  
+
+(p_imbalance_bias <- makeplot1(dat = mainB, x= "imbalance",filterstring = c("base0","base0 small imbalance", "base0 med imbalance", "base0 large imbalance"),
+          mse=FALSE, titlestring = "Imbalance in Positive Effect", 
+          xlabstring = "Imbalance", 
+          ylabstring = "Average Bias (zero is best)")+
+          theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)))
+
+
+
+
+```
+
+
+
+## Values for Manuscript
+
+```{r}
+
+#MSE
+outimbalance_mse <- datasummary1(mainB, x= "type",filterstring = c("base0","base0 small imbalance", "base0 med imbalance", "base0 large imbalance"),
+          mse=TRUE) %>%
+  filter((posneg=="Negative Effect" & posneg2=="biasneg") | (posneg=="Positive Effect" & posneg2=="biaspos"))
+outimbalance_mse
+
+
+
+#Average Bias
+outimbalance_bias <- datasummary1(mainB, x= "type",filterstring = c("base0","base0 small imbalance", "base0 med imbalance", "base0 large imbalance"),
+          mse=FALSE) %>%
+  filter((posneg=="Negative Effect" & posneg2=="biasneg") | (posneg=="Positive Effect" & posneg2=="biaspos"))
+outimbalance_bias
+
+
+```
+
+
+# Missing Exposures
+
+(Suggested by coauthors)
+
+```{r, eval=FALSE}
+test <- mainB%>%
+      dplyr::filter(type %in% c("base0","base0 missingvars")) %>%
+      pivot_longer(cols=c(`Positive Effect`, `Negative Effect`), names_to = "posneg", values_to = "mse")%>% 
+      pivot_longer(cols=c(biaspos,biasneg), names_to = "posneg2", values_to = "bias") %>%
+      group_by(type, name.x,N, jointpos, jointneg, Nexposures, Nexposures0, posneg, posneg2, corr, imbalance, missing) %>%
+      dplyr::summarize(mean_mse = mean(mse),
+                mean_bias = mean(bias)) %>% 
+      filter((posneg=="Negative Effect" & posneg2=="biasneg") | (posneg=="Positive Effect" & posneg2=="biaspos")) %>%
+      mutate(name.x2 = name.x) %>%
+      mutate(name.x = if_else( name.x2=="QGC: A Priori", "QGCAP",
+                               if_else(name.x2 == "QGC: Enet", "QGCEN", name.x2))) 
+      ggplot(data=test) +
+      geom_line(aes(y=log(mean_mse), x=missing,group=name.x, color=name.x), size=2) 
+      geom_point(aes(y=log(mean_mse), x=type, shape=name.x), size=3) +
+      scale_shape_manual(values=1:9)+
+      facet_grid(.~posneg) + theme_bw()
+      ggtitle(titlestring) + xlab(xlabstring)+ylab(ylabstring) + theme(legend.position = "bottom",legend.title = element_blank())+
+      scale_color_manual(values=mycols) 
+```
+
+
+```{r}
+(p_missing_mse <- makeplot1(dat = mainB, x= "missing",filterstring = c("base0","base0 missingvars"),
+          mse=TRUE, titlestring = "Missing positive exposure", 
+          xlabstring = "", 
+          ylabstring = "(Log) MSE (higher is worse)") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)))
+  
+
+(p_missing_bias <- makeplot1(dat = mainB, x= "missing",filterstring = c("base0","base0 missingvars"),
+          mse=FALSE, titlestring = "Missing positive exposure", 
+          xlabstring = "", 
+          ylabstring = "Average Bias (zero is best)")+
+          theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)))
+
+```
+
+
+
+
+# Combine Plots (Manuscript Figures 1 and 2)
+
+
+```{r}
+library(patchwork)
+
+p_corr_mse + p_samplesize_mse +  p_spread_mse + p_imbalance_mse + plot_layout(ncol=2) + plot_annotation(tag_levels = "A", title="Comparison of Mean Squared Error (MSE) Across Methods Estimating Partial Effects")
+ggsave(filename = "../../Manuscript/EHP/Resubmission/figures/Figure1.pdf", width = 10, height = 10, units = "in")
+
+
+
+p_corr_bias + p_samplesize_bias +  p_spread_bias + p_imbalance_bias+ plot_layout(ncol=2) + plot_annotation(tag_levels = "A", title="Comparison of Average Bias Across Methods Estimating Partial Effects")
+ggsave(filename = "../../Manuscript/EHP/Resubmission/figures/Figure2.pdf", width = 10, height = 10, units = "in")
+
+
+
+```
+
+# Create Tables
+
+## Sample size
+
+```{r}
+
+
+tab <-  mainB %>%
+      filter(type %in% c("base0","base0 bigN", "base0 biggerN", "base0 smallN")) %>%
+      pivot_longer(cols=c(`Positive Effect`, `Negative Effect`), names_to = "posneg", values_to = "mse")%>%
+      pivot_longer(cols=c(biaspos,biasneg), names_to = "posneg2", values_to = "bias") %>%
+      group_by(type, name.x,N, jointpos, jointneg, Nexposures, Nexposures0, posneg, posneg2, corr, imbalance) %>%
+      summarize(mean_mse = mean(mse),
+                mean_bias = mean(bias), .groups="drop") %>% 
+      filter((posneg=="Negative Effect" & posneg2=="biasneg") | (posneg=="Positive Effect" & posneg2=="biaspos")) %>%
+  ungroup() %>%
+  dplyr::select(-c(type, jointpos, jointneg, Nexposures, Nexposures0, posneg2, corr, imbalance)) %>%
+  pivot_wider(names_from = "posneg", values_from = c("mean_mse", "mean_bias"))
+
+tab %>%
+   mutate(name = if_else( name.x=="QGC: A Priori", "QGCAP",
+                               if_else(name.x == "QGC: Enet", "QGCEN", name.x))) %>%
+  relocate(name) %>%
+  dplyr::select(-name.x) %>%
+  arrange(N, name) %>%
+  mutate(`mean_mse_Negative Effect` = log(`mean_mse_Negative Effect`),
+         `mean_mse_Positive Effect` = log(`mean_mse_Positive Effect`)) %>%
+  gt() %>%
+  fmt_number(columns = 3:6,n_sigfig = 3) %>%
+  fmt_scientific(columns = 5:6, n_sigfig = 3) %>%
+  cols_label(name="Method",
+             "mean_mse_Negative Effect" = "Negative Effect",
+             "mean_mse_Positive Effect" = "Positive Effect",
+             "mean_bias_Negative Effect" = "Negative Effect",
+             "mean_bias_Positive Effect" = "Positive Effect") %>%
+  tab_spanner(label="(Log) MSE", columns=3:4, id=1) %>%
+  tab_spanner(label="Bias", columns=5:6, id=2) %>%
+  tab_header(title="Simulation Results: Sample Size")%>%
+  gt::gtsave(., "../../Manuscript/EHP/Resubmission/tables/sim_samplesize.rtf")
+
+
+```
+
+## Spread
+
+```{r}
+tab <-  mainB %>%
+      filter(type %in% c("base0 spread4", "base0 spread1", "base0 spread8")) %>%
+      pivot_longer(cols=c(`Positive Effect`, `Negative Effect`), names_to = "posneg", values_to = "mse")%>%
+      pivot_longer(cols=c(biaspos,biasneg), names_to = "posneg2", values_to = "bias") %>%
+      group_by(type, name.x,N, jointpos, jointneg, Nexposures, Nexposures0, posneg, posneg2, corr, imbalance) %>%
+      summarize(mean_mse = mean(mse),
+                mean_bias = mean(bias), .groups="drop") %>% 
+      filter((posneg=="Negative Effect" & posneg2=="biasneg") | (posneg=="Positive Effect" & posneg2=="biaspos")) %>%
+  ungroup() %>%
+  dplyr::select(-c(type, jointpos, jointneg, N, Nexposures0, posneg2, corr, imbalance)) %>%
+  pivot_wider(names_from = "posneg", values_from = c("mean_mse", "mean_bias"))
+
+tab %>%
+ mutate(name = if_else( name.x=="QGC: A Priori", "QGCAP",
+                               if_else(name.x == "QGC: Enet", "QGCEN", name.x))) %>%
+    mutate(`mean_mse_Negative Effect` = log(`mean_mse_Negative Effect`),
+         `mean_mse_Positive Effect` = log(`mean_mse_Positive Effect`)) %>%
+  relocate(name) %>%
+  dplyr::select(-name.x) %>%
+  arrange(Nexposures, name) %>%
+  gt() %>%
+    fmt_number(columns = 3:6,n_sigfig = 3) %>%
+  fmt_scientific(columns = 5:6, n_sigfig = 3) %>%
+  cols_label(name="Method",
+             Nexposures = "Number of Exposures",
+             "mean_mse_Negative Effect" = "Negative Effect",
+             "mean_mse_Positive Effect" = "Positive Effect",
+             "mean_bias_Negative Effect" = "Negative Effect",
+             "mean_bias_Positive Effect" = "Positive Effect") %>%
+  tab_spanner(label="(Log) MSE", columns=3:4, id=1) %>%
+  tab_spanner(label="Bias", columns=5:6, id=2) %>%
+  tab_header(title="Simulation Results: Spread in Negative Effect Across Exposures")  %>%
+  gt::gtsave(., "../../Manuscript/EHP/Resubmission/tables/sim_spread.rtf")
+```
+
+## Correlation
+
+```{r}
+tab <-  mainB %>%
+      filter(type %in% c("base0 hicorr Exp", "base0 medcorr Exp", "base0 smallcorr Exp","base0")) %>%
+      pivot_longer(cols=c(`Positive Effect`, `Negative Effect`), names_to = "posneg", values_to = "mse")%>%
+      pivot_longer(cols=c(biaspos,biasneg), names_to = "posneg2", values_to = "bias") %>%
+      group_by(type, name.x,N, jointpos, jointneg, Nexposures, Nexposures0, posneg, posneg2, corr, imbalance) %>%
+      summarize(mean_mse = mean(mse),
+                mean_bias = mean(bias), .groups="drop") %>% 
+      filter((posneg=="Negative Effect" & posneg2=="biasneg") | (posneg=="Positive Effect" & posneg2=="biaspos")) %>%
+  ungroup() %>%
+  dplyr::select(-c(type, jointpos, jointneg, Nexposures, N, Nexposures0, posneg2,  imbalance)) %>%
+  pivot_wider(names_from = "posneg", values_from = c("mean_mse", "mean_bias"))
+
+tab %>%
+ mutate(name = if_else( name.x=="QGC: A Priori", "QGCAP",
+                               if_else(name.x == "QGC: Enet", "QGCEN", name.x))) %>%
+    mutate(`mean_mse_Negative Effect` = log(`mean_mse_Negative Effect`),
+         `mean_mse_Positive Effect` = log(`mean_mse_Positive Effect`)) %>%
+  relocate(name) %>%
+  dplyr::select(-name.x) %>%
+  arrange(corr, name) %>%
+  gt() %>%
+    fmt_number(columns = 3:6,n_sigfig = 3) %>%
+  fmt_scientific(columns = 5:6, n_sigfig = 3) %>%
+  cols_label(name="Method",
+             corr = "Correlation",
+             "mean_mse_Negative Effect" = "Negative Effect",
+             "mean_mse_Positive Effect" = "Positive Effect",
+             "mean_bias_Negative Effect" = "Negative Effect",
+             "mean_bias_Positive Effect" = "Positive Effect") %>%
+  tab_spanner(label="MSE", columns=3:4, id=1) %>%
+  tab_spanner(label="Bias", columns=5:6, id=2) %>%
+  tab_header(title="Simulation Results: Correlation Among Exposures") %>%
+  gt::gtsave(., "../../Manuscript/EHP/Resubmission/tables/sim_correlation.rtf")
+```
+
+
+
+## Imbalance
+
+```{r}
+tab <-  mainB %>%
+      filter(type %in% c("base0","base0 small imbalance", "base0 med imbalance", "base0 large imbalance")) %>%
+      pivot_longer(cols=c(`Positive Effect`, `Negative Effect`), names_to = "posneg", values_to = "mse")%>%
+      pivot_longer(cols=c(biaspos,biasneg), names_to = "posneg2", values_to = "bias") %>%
+      group_by(type, name.x,N, jointpos, jointneg, Nexposures, Nexposures0, posneg, posneg2, corr, imbalance) %>%
+      summarize(mean_mse = mean(mse),
+                mean_bias = mean(bias), .groups="drop") %>% 
+      filter((posneg=="Negative Effect" & posneg2=="biasneg") | (posneg=="Positive Effect" & posneg2=="biaspos")) %>%
+  ungroup() %>%
+  dplyr::select(-c(type, jointpos, jointneg, Nexposures, N, Nexposures0, posneg2,  corr)) %>%
+  pivot_wider(names_from = "posneg", values_from = c("mean_mse", "mean_bias"))
+
+tab %>%
+ mutate(name = if_else( name.x=="QGC: A Priori", "QGCAP",
+                               if_else(name.x == "QGC: Enet", "QGCEN", name.x))) %>%
+    mutate(`mean_mse_Negative Effect` = log(`mean_mse_Negative Effect`),
+         `mean_mse_Positive Effect` = log(`mean_mse_Positive Effect`)) %>%
+
+  relocate(name) %>%
+  dplyr::select(-name.x) %>%
+  arrange(imbalance, name) %>%
+  gt() %>%
+    fmt_number(columns = 3:6,n_sigfig = 3) %>%
+  fmt_scientific(columns = 5:6, n_sigfig = 3) %>%
+  cols_label(name="Method",
+             imbalance= "Imbalance",
+             "mean_mse_Negative Effect" = "Negative Effect",
+             "mean_mse_Positive Effect" = "Positive Effect",
+             "mean_bias_Negative Effect" = "Negative Effect",
+             "mean_bias_Positive Effect" = "Positive Effect") %>%
+  tab_spanner(label="MSE", columns=3:4, id=1) %>%
+  tab_spanner(label="Bias", columns=5:6, id=2) %>%
+  tab_header(title="Simulation Results: Imbalance in Effects") %>%
+  gt::gtsave(., "../../Manuscript/EHP/Resubmission/tables/sim_imbalance.rtf")
+```
+
