@@ -48,8 +48,8 @@ makeplot1 <- function(dat, x, filterstring, mse=TRUE, titlestring, xlabstring, y
       mutate(name.x = if_else( name.x2=="QGC: A Priori", "QGCAP",
                                if_else(name.x2 == "QGC: Enet", "QGCEN", name.x2))) %>% 
       ggplot() +
-      geom_line(aes(y=log(mean_mse), x=.data[[x]], group=name.x, color=name.x), size=2) +
-      geom_point(aes(y=log(mean_mse), x=.data[[x]], shape=name.x), size=3) +
+      geom_line(aes(y=sqrt(mean_mse), x=.data[[x]], group=name.x, color=name.x), size=2) +
+      geom_point(aes(y=sqrt(mean_mse), x=.data[[x]], shape=name.x), size=3) +
       scale_shape_manual(values=1:9)+
       facet_grid(.~posneg) + theme_bw()+ ggtitle(titlestring) + xlab(xlabstring)+ylab(ylabstring) + theme(legend.position = "bottom",legend.title = element_blank())+
       scale_color_manual(values=mycols) 
@@ -223,7 +223,7 @@ main_oc <-
 (p_samplesize_mse <- makeplot1(dat=mainB,x="N", filterstring = c("base0","base0 bigN", "base0 biggerN", "base0 smallN"),
           mse=TRUE, titlestring = "Sample Size", 
           xlabstring = "Sample Size, N", 
-          ylabstring = "(Log) MSE (higher is worse)")) 
+          ylabstring = "RMSE (higher is worse)")) 
 
 
 (p_samplesize_bias <- makeplot1(dat = mainB,x="N", filterstring = c("base0","base0 bigN", "base0 biggerN", "base0 smallN"),
@@ -271,7 +271,7 @@ outsamp_bias
 (p_spread_mse <- makeplot1(dat = mainB, x= "Nexposures",filterstring = c("base0 spread4", "base0 spread1", "base0 spread8"),
           mse=TRUE, titlestring = "Spreading the Negative Partial Effect\nOver More Exposures", 
           xlabstring = "Number of Negative Exposures", 
-          ylabstring = "(Log) MSE (higher is worse)"))
+          ylabstring = "RMSE (higher is worse)"))
 (p_spread_bias <- makeplot1(dat = mainB, x= "Nexposures",filterstring = c("base0 spread4", "base0 spread1", "base0 spread8"),
           mse=FALSE, titlestring = "Spreading the Partial Effect\nOver More Exposures", 
           xlabstring = "Number of Negative Exposures", 
@@ -320,7 +320,7 @@ outspread_bias
 (p_corr_mse <-makeplot1(dat = mainB, x= "corr",filterstring = c("base0 hicorr Exp", "base0 medcorr Exp", "base0 smallcorr Exp","base0"),
           mse=TRUE, titlestring = "Correlated Exposures", 
           xlabstring = "Correlation", 
-          ylabstring = "(Log) MSE (higher is worse)"))
+          ylabstring = "RMSE (higher is worse)"))
 (p_corr_bias <- makeplot1(dat = mainB, x= "corr",filterstring = c("base0 hicorr Exp", "base0 medcorr Exp", "base0 smallcorr Exp","base0"),
           mse=FALSE, titlestring = "Correlated Exposures", 
           xlabstring = "Correlation", 
@@ -362,7 +362,7 @@ outcorr_bias
 (p_imbalance_mse <- makeplot1(dat = mainB, x= "imbalance",filterstring = c("base0","base0 small imbalance", "base0 med imbalance", "base0 large imbalance"),
           mse=TRUE, titlestring = "Imbalance in Positive Effect", 
           xlabstring = "Imbalance", 
-          ylabstring = "(Log) MSE (higher is worse)") +
+          ylabstring = "RMSE (higher is worse)") +
   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)))
   
 
@@ -401,49 +401,6 @@ outimbalance_bias
 ```
 
 
-# Missing Exposures
-
-(Suggested by coauthors)
-
-```{r, eval=FALSE}
-test <- mainB%>%
-      dplyr::filter(type %in% c("base0","base0 missingvars")) %>%
-      pivot_longer(cols=c(`Positive Effect`, `Negative Effect`), names_to = "posneg", values_to = "mse")%>% 
-      pivot_longer(cols=c(biaspos,biasneg), names_to = "posneg2", values_to = "bias") %>%
-      group_by(type, name.x,N, jointpos, jointneg, Nexposures, Nexposures0, posneg, posneg2, corr, imbalance, missing) %>%
-      dplyr::summarize(mean_mse = mean(mse),
-                mean_bias = mean(bias)) %>% 
-      filter((posneg=="Negative Effect" & posneg2=="biasneg") | (posneg=="Positive Effect" & posneg2=="biaspos")) %>%
-      mutate(name.x2 = name.x) %>%
-      mutate(name.x = if_else( name.x2=="QGC: A Priori", "QGCAP",
-                               if_else(name.x2 == "QGC: Enet", "QGCEN", name.x2))) 
-      ggplot(data=test) +
-      geom_line(aes(y=log(mean_mse), x=missing,group=name.x, color=name.x), size=2) 
-      geom_point(aes(y=log(mean_mse), x=type, shape=name.x), size=3) +
-      scale_shape_manual(values=1:9)+
-      facet_grid(.~posneg) + theme_bw()
-      ggtitle(titlestring) + xlab(xlabstring)+ylab(ylabstring) + theme(legend.position = "bottom",legend.title = element_blank())+
-      scale_color_manual(values=mycols) 
-```
-
-
-```{r}
-(p_missing_mse <- makeplot1(dat = mainB, x= "missing",filterstring = c("base0","base0 missingvars"),
-          mse=TRUE, titlestring = "Missing positive exposure", 
-          xlabstring = "", 
-          ylabstring = "(Log) MSE (higher is worse)") +
-  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)))
-  
-
-(p_missing_bias <- makeplot1(dat = mainB, x= "missing",filterstring = c("base0","base0 missingvars"),
-          mse=FALSE, titlestring = "Missing positive exposure", 
-          xlabstring = "", 
-          ylabstring = "Average Bias (zero is best)")+
-          theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)))
-
-```
-
-
 
 
 # Combine Plots (Manuscript Figures 1 and 2)
@@ -452,7 +409,7 @@ test <- mainB%>%
 ```{r}
 library(patchwork)
 
-p_corr_mse + p_samplesize_mse +  p_spread_mse + p_imbalance_mse + plot_layout(ncol=2) + plot_annotation(tag_levels = "A", title="Comparison of Mean Squared Error (MSE) Across Methods Estimating Partial Effects")
+p_corr_mse + p_samplesize_mse +  p_spread_mse + p_imbalance_mse + plot_layout(ncol=2) + plot_annotation(tag_levels = "A", title="Comparison of Root Mean Squared Error (RMSE) Across Methods Estimating Partial Effects")
 ggsave(filename = "../../Manuscript/EHP/Resubmission/figures/Figure1.pdf", width = 10, height = 10, units = "in")
 
 
@@ -489,8 +446,8 @@ tab %>%
   relocate(name) %>%
   dplyr::select(-name.x) %>%
   arrange(N, name) %>%
-  mutate(`mean_mse_Negative Effect` = log(`mean_mse_Negative Effect`),
-         `mean_mse_Positive Effect` = log(`mean_mse_Positive Effect`)) %>%
+  mutate(`mean_mse_Negative Effect` = sqrt(`mean_mse_Negative Effect`),
+         `mean_mse_Positive Effect` = sqrt(`mean_mse_Positive Effect`)) %>%
   gt() %>%
   fmt_number(columns = 3:6,n_sigfig = 3) %>%
   fmt_scientific(columns = 5:6, n_sigfig = 3) %>%
@@ -499,7 +456,7 @@ tab %>%
              "mean_mse_Positive Effect" = "Positive Effect",
              "mean_bias_Negative Effect" = "Negative Effect",
              "mean_bias_Positive Effect" = "Positive Effect") %>%
-  tab_spanner(label="(Log) MSE", columns=3:4, id=1) %>%
+  tab_spanner(label="RMSE", columns=3:4, id=1) %>%
   tab_spanner(label="Bias", columns=5:6, id=2) %>%
   tab_header(title="Simulation Results: Sample Size")%>%
   gt::gtsave(., "../../Manuscript/EHP/Resubmission/tables/sim_samplesize.rtf")
@@ -525,8 +482,8 @@ tab <-  mainB %>%
 tab %>%
  mutate(name = if_else( name.x=="QGC: A Priori", "QGCAP",
                                if_else(name.x == "QGC: Enet", "QGCEN", name.x))) %>%
-    mutate(`mean_mse_Negative Effect` = log(`mean_mse_Negative Effect`),
-         `mean_mse_Positive Effect` = log(`mean_mse_Positive Effect`)) %>%
+    mutate(`mean_mse_Negative Effect` = sqrt(`mean_mse_Negative Effect`),
+         `mean_mse_Positive Effect` = sqrt(`mean_mse_Positive Effect`)) %>%
   relocate(name) %>%
   dplyr::select(-name.x) %>%
   arrange(Nexposures, name) %>%
@@ -539,7 +496,7 @@ tab %>%
              "mean_mse_Positive Effect" = "Positive Effect",
              "mean_bias_Negative Effect" = "Negative Effect",
              "mean_bias_Positive Effect" = "Positive Effect") %>%
-  tab_spanner(label="(Log) MSE", columns=3:4, id=1) %>%
+  tab_spanner(label="RMSE", columns=3:4, id=1) %>%
   tab_spanner(label="Bias", columns=5:6, id=2) %>%
   tab_header(title="Simulation Results: Spread in Negative Effect Across Exposures")  %>%
   gt::gtsave(., "../../Manuscript/EHP/Resubmission/tables/sim_spread.rtf")
@@ -563,8 +520,8 @@ tab <-  mainB %>%
 tab %>%
  mutate(name = if_else( name.x=="QGC: A Priori", "QGCAP",
                                if_else(name.x == "QGC: Enet", "QGCEN", name.x))) %>%
-    mutate(`mean_mse_Negative Effect` = log(`mean_mse_Negative Effect`),
-         `mean_mse_Positive Effect` = log(`mean_mse_Positive Effect`)) %>%
+    mutate(`mean_mse_Negative Effect` = sqrt(`mean_mse_Negative Effect`),
+         `mean_mse_Positive Effect` = sqrt(`mean_mse_Positive Effect`)) %>%
   relocate(name) %>%
   dplyr::select(-name.x) %>%
   arrange(corr, name) %>%
@@ -603,8 +560,8 @@ tab <-  mainB %>%
 tab %>%
  mutate(name = if_else( name.x=="QGC: A Priori", "QGCAP",
                                if_else(name.x == "QGC: Enet", "QGCEN", name.x))) %>%
-    mutate(`mean_mse_Negative Effect` = log(`mean_mse_Negative Effect`),
-         `mean_mse_Positive Effect` = log(`mean_mse_Positive Effect`)) %>%
+    mutate(`mean_mse_Negative Effect` = sqrt(`mean_mse_Negative Effect`),
+         `mean_mse_Positive Effect` = sqrt(`mean_mse_Positive Effect`)) %>%
 
   relocate(name) %>%
   dplyr::select(-name.x) %>%
